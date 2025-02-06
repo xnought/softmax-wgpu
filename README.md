@@ -1,6 +1,6 @@
 # softmax-wgpu
 
-(educational) fastest softmax in webgpu.
+(educational) fastest softmax in webgpu over a matrix across the final dimension.
 
 GPU API from myself at https://github.com/xnought/webgpu-compute
 
