@@ -6,7 +6,7 @@ async function dev() {
 	const gpu = await GPU.init();
 	gpu.printDeviceInfo();
 
-	const shape = [5, 4];
+	const shape = [1000, 1000];
 	const a = genRangeData(shape);
 	const aDev = gpu.memAlloc(a.byteLength);
 	gpu.memcpyHostToDevice(aDev, a);
@@ -14,7 +14,7 @@ async function dev() {
 	await printMatrix(gpu, aDev, shape);
 
 	const result = gpu.memAlloc(a.byteLength);
-	safeSoftmax(gpu, result, aDev, shape);
+	safeSoftmax2D(gpu, result, aDev, shape);
 	await gpu.deviceSynchronize();
 	await printMatrix(gpu, result, shape);
 }
@@ -34,7 +34,7 @@ async function printMatrix(gpu, buffer, shape) {
 function genRangeData([rows, cols]) {
 	const cpuData = new Float32Array(rows * cols);
 	for (let i = 0; i < cpuData.length; i++) {
-		cpuData[i] = Math.random();
+		cpuData[i] = 1;
 	}
 	return cpuData;
 }
@@ -119,4 +119,48 @@ function safeSoftmax(gpu, dst, src, shape) {
 		.getFunction("main");
 
 	main([Math.ceil(maxLength / 256)], dst, src);
+}
+
+/**
+ * First max, then sub, exp, then sum, then divide.
+ * @param {GPU} gpu
+ * @param {GPUBuffer} dst
+ * @param {GPUBuffer} src
+ * @param {[number, number]} shape
+ */
+function safeSoftmax2D(gpu, dst, src, shape) {
+	const maxLength = shape[0] * shape[1];
+	const main = gpu
+		.SourceModule(
+			/*wgsl*/ `
+		@group(0) @binding(0) var<storage, read_write> dst: array<f32>;
+		@group(0) @binding(1) var<storage, read> src: array<f32>;
+
+		@compute @workgroup_size(16, 16)
+		fn main(@builtin(global_invocation_id) gid : vec3u) {
+			let i = gid.x;
+			let j = gid.y;
+			if(i < ${shape[0]} && j < ${shape[1]}) {
+				let ij = i*${shape[1]} + j;
+				var max: f32 = src[i*${shape[1]}];
+				for(var k: u32 = 0; k < ${shape[1]}; k++) {
+					let ik = i*${shape[1]} + k;
+					let curMax = src[ik];
+					if(curMax > max) {
+						max = curMax;
+					}
+				}
+				var denom: f32 = 0.0;
+				for(var k: u32 = 0; k < ${shape[1]}; k++) {
+					let ik = i*${shape[1]} + k;
+					denom += exp(src[ik] - max);
+				}
+				dst[ij] = exp(src[ij] - max) / denom;
+			}
+		}
+	`
+		)
+		.getFunction("main");
+
+	main([Math.ceil(shape[0] / 16), Math.ceil(shape[1] / 16)], dst, src);
 }
