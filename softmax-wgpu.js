@@ -14,7 +14,7 @@ async function dev() {
 	await printMatrix(gpu, aDev, shape);
 
 	const result = gpu.memAlloc(a.byteLength);
-	safeSoftmax2D(gpu, result, aDev, shape);
+	onlineSafeSoftmax(gpu, result, aDev, shape);
 	await gpu.deviceSynchronize();
 	await printMatrix(gpu, result, shape);
 }
@@ -156,6 +156,49 @@ function safeSoftmax2D(gpu, dst, src, shape) {
 					denom += exp(src[ik] - max);
 				}
 				dst[ij] = exp(src[ij] - max) / denom;
+			}
+		}
+	`
+		)
+		.getFunction("main");
+
+	main([Math.ceil(shape[0] / 16), Math.ceil(shape[1] / 16)], dst, src);
+}
+
+/**
+ * max and sum without multiples memory accesses
+ * @param {GPU} gpu
+ * @param {GPUBuffer} dst
+ * @param {GPUBuffer} src
+ * @param {[number, number]} shape
+ */
+function onlineSafeSoftmax(gpu, dst, src, shape) {
+	const maxLength = shape[0] * shape[1];
+	const main = gpu
+		.SourceModule(
+			/*wgsl*/ `
+		@group(0) @binding(0) var<storage, read_write> dst: array<f32>;
+		@group(0) @binding(1) var<storage, read> src: array<f32>;
+
+		@compute @workgroup_size(16, 16)
+		fn main(@builtin(global_invocation_id) gid : vec3u) {
+			let i = gid.x;
+			let j = gid.y;
+			if(i < ${shape[0]} && j < ${shape[1]}) {
+				var _max: f32 = src[i*${shape[1]}];
+				var denom: f32 = 0.0;
+				// Can I move this to be shared across threads?
+				for(var k: u32 = 0; k < ${shape[1]}; k++) {
+					let ik = i*${shape[1]} + k;
+					let val = src[ik];
+					if(val > _max) {
+						denom *= exp(_max - val);
+						_max = val;
+					} 
+					denom += exp(val-_max);
+				}
+				let ij = i*${shape[1]} + j;
+				dst[ij] = exp(src[ij] - _max) / denom;
 			}
 		}
 	`

@@ -8,8 +8,7 @@ GPU API from myself at https://github.com/xnought/webgpu-compute
 
 - [x] Naive implementation without max
 - [x] With max
-- [ ] Online max calculation
-- [ ] Online sum calculation
+- [ ] Online softmax
 - [ ] Optimized shared memory and reductions
 
 ## Dev
